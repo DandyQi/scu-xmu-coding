@@ -3,7 +3,7 @@
 from __future__ import print_function
 
 import logging
-import re
+import codecs
 
 import jieba
 import jieba.posseg
@@ -15,6 +15,15 @@ def get_logger(name="default"):
     logging.basicConfig(level=logging.INFO,
                         format='%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s')
     return logging.getLogger(name)
+
+
+def make_stopwords(stop_words_path=None):
+    if stop_words_path is None:
+        return None
+
+    lines = list(IterDocument(stop_words_path))
+    stop_words = zip(lines, range(len(lines)))
+    return dict(stop_words)
 
 
 class IterDocument(object):
@@ -60,6 +69,7 @@ class TextCleaner(object):
         self.norm = normalize
 
         self.punctuation = IterDocument("resource/punctuation")
+        self.stop_words = make_stopwords("resource/stopwords")
 
     def clean(self, text):
         """
@@ -69,9 +79,12 @@ class TextCleaner(object):
         """
         if self.punc:
             for p in self.punctuation:
-                text = re.sub(p, "", text)
+                text = text.replace(p.encode("utf-8"), "")
 
         return text.strip()
+
+    def remove_stopwords(self, text):
+        return [w for w in text if w not in self.stop_words]
 
 
 class Segmentor(object):
@@ -121,7 +134,7 @@ class PreProcess(object):
                                              "评论内容": "content",
                                              "平台名称": "platform",
                                              "发布时间": "timestamp",
-                                             "用户名称": "user"})
+                                             "用户名称": "user"}).drop_duplicates(subset=["id"])
 
         self.logger.info("data size: %s" % self.corpus.shape[0])
 
@@ -136,7 +149,8 @@ class PreProcess(object):
         Segment text
         """
         def seg(row):
-            row["content_seg"] = self.seg.seg_token(self.cleaner.clean(row["content"]))
+            row["content_seg"] = self.cleaner.remove_stopwords(self.seg.seg_token(self.cleaner.clean(row["content"])))
+            # row["content_seg"] = self.seg.seg_token(self.cleaner.clean(row["content"]))
             return row
 
         self.corpus = self.corpus.apply(seg, axis=1)
@@ -180,6 +194,16 @@ class DataSet(object):
         """
         shuffle_arrays(self.text, self.text_seg)
 
+    def save_data(self):
+        df = pd.DataFrame([self.text, self.text_seg]).T
+        df.to_csv("data/comment_data", sep="\t", encoding="utf-8", index=None)
+        logging.info("Save data to data/comment_data")
+
+    @staticmethod
+    def load_data():
+        df = pd.read_csv("data/comment_data", sep="\t", encoding="utf-8", names=["text", "text_seg"], header=1).dropna()
+        return DataSet(df["text"].values, df["text_seg"].values)
+
 
 def shuffle_arrays(*arrays):
     """
@@ -193,5 +217,15 @@ def shuffle_arrays(*arrays):
 
 
 if __name__ == "__main__":
-    file_name = "data/comment"
-    pre = PreProcess(file_name)
+    # file_name = "data/comment"
+    # pre = PreProcess(file_name)
+    cleaner = TextCleaner()
+    seg = Segmentor()
+
+    text = "何事，西风。悲画扇？！你我还行"
+    text = cleaner.clean(text)
+    print(text.decode("utf-8"))
+    text = seg.seg_token(text)
+    print(" ".join(text))
+    text = cleaner.remove_stopwords(text)
+    print(" ".join(text))
