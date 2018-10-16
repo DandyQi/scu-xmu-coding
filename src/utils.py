@@ -3,7 +3,6 @@
 from __future__ import print_function
 
 import logging
-import codecs
 
 import jieba
 import jieba.posseg
@@ -99,7 +98,10 @@ class Segmentor(object):
         self.seg = jieba
         self.seg_pos = jieba.posseg
         if user_dict:
-            self.seg.load_userdict("resource/userdict")
+            self.seg.load_userdict("../resource/userdict")
+            self.seg.load_userdict("../resource/financial_complete.txt")
+            self.seg.load_userdict("../resource/P2P_Online_loan_platform_2017.txt")
+            self.seg.load_userdict("../resource/platform_name.txt")
 
     def seg_token(self, text):
         """
@@ -220,12 +222,12 @@ if __name__ == "__main__":
     # file_name = "data/comment"
     # pre = PreProcess(file_name)
     cleaner = TextCleaner()
-    seg = Segmentor()
+    segmentor = Segmentor()
 
-    text = "何事，西风。悲画扇？！你我还行"
-    text = cleaner.clean(text)
-    print(text.decode("utf-8"))
-    text = seg.seg_token(text)
-    print(" ".join(text))
-    text = cleaner.remove_stopwords(text)
-    print(" ".join(text))
+    test_text = "何事，西风。悲画扇？！你我还行"
+    test_text = cleaner.clean(test_text)
+    print(test_text.decode("utf-8"))
+    test_text = segmentor.seg_token(test_text)
+    print(" ".join(test_text))
+    test_text = cleaner.remove_stopwords(test_text)
+    print(" ".join(test_text))
