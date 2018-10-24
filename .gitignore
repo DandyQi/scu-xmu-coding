@@ -108,5 +108,5 @@ venv.bak/
 #data
 Cross-Domain_data/
 data/
-
+/data
 /.idea
