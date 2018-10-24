@@ -1,0 +1,6 @@
+HED,a;SBV,n
+HED,d;SBV,v
+HED,n;ATT,a
+HED,v;VOB,v
+HED,v;VOB,a;SBV,v
+HED,v;CMP,a

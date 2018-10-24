@@ -4,10 +4,13 @@ from __future__ import print_function
 
 import logging
 
-import jieba
-import jieba.posseg
+from pyltp import SentenceSplitter, Segmentor, Postagger, Parser
 import pandas as pd
 import numpy as np
+
+CWS_MODEL = "model/cws.model"
+POS_MODEL = "model/pos.model"
+PARSER_MODEL = "model/parser.model"
 
 
 def get_logger(name="default"):
@@ -42,8 +45,8 @@ class IterDocument(object):
         """
         :return: iteration in lines
         """
-        for line in open(self.path, 'r').readlines():
-            line = line.strip().decode("utf-8")
+        for line in open(self.path, 'r', encoding="utf-8").readlines():
+            line = line.strip()
             if line == '':
                 continue
             if self.sep is not None:
@@ -68,7 +71,7 @@ class TextCleaner(object):
         self.norm = normalize
 
         self.punctuation = IterDocument("resource/punctuation")
-        self.stop_words = make_stopwords("resource/stopwords")
+        # self.stop_words = make_stopwords("resource/stopwords")
 
     def clean(self, text):
         """
@@ -78,44 +81,130 @@ class TextCleaner(object):
         """
         if self.punc:
             for p in self.punctuation:
-                text = text.replace(p.encode("utf-8"), "")
+                text = text.replace(p, "")
+
+        if self.norm:
+            pass
 
         return text.strip()
 
-    def remove_stopwords(self, text):
-        return [w for w in text if w not in self.stop_words]
+    def seg_sentence(self, text):
+        for p in self.punctuation:
+            text = text.replace(p, "。")
+
+        return text.strip()
+
+    # def remove_stopwords(self, text):
+    #     return [w for w in text if w not in self.stop_words]
 
 
-class Segmentor(object):
+class WordNode:
+    def __init__(self, token, pos, relation):
+        self.token = token
+        self.pos = pos
+        self.relation = relation
+        self.next = []
+
+    def to_str(self):
+        return "token: %s, pos: %s, relation: %s" % (self.token, self.pos, self.relation)
+
+    def path(self):
+        res = []
+        queue = self.next
+        path = [self]
+
+        while len(queue):
+            cur_node = queue.pop()
+
+            if len(cur_node.next) == 0:
+                path.append(cur_node)
+                new_path = path.copy()
+                res.append(new_path)
+                path.pop()
+            else:
+                for node in cur_node.next:
+                    queue.insert(0, node)
+                path.append(cur_node)
+
+        return res
+
+
+def find_x(s, x):
+    return [idx for idx, item in enumerate(s) if item[0] == x]
+
+
+class SentenceParser(object):
     """
     A class for segmenting text
     """
-    def __init__(self, user_dict=True):
+    def __init__(self):
         """
         Initial
-        :param user_dict: whether use user dict
         """
-        self.seg = jieba
-        self.seg_pos = jieba.posseg
-        if user_dict:
-            self.seg.load_userdict("../resource/userdict")
-            self.seg.load_userdict("../resource/financial_complete.txt")
-            self.seg.load_userdict("../resource/P2P_Online_loan_platform_2017.txt")
-            self.seg.load_userdict("../resource/platform_name.txt")
+        self.sen_split = SentenceSplitter()
+        self.seg = Segmentor()
+        self.seg.load_with_lexicon(CWS_MODEL, "resource/lexicon")
+        self.pos = Postagger()
+        self.pos.load_with_lexicon(POS_MODEL, "resource/lexicon")
+        self.parser = Parser()
+        self.parser.load(PARSER_MODEL)
+
+        self.rule = IterDocument("resource/rule")
+
+    def seg_sentence(self, text):
+        return self.sen_split.split(text)
 
     def seg_token(self, text):
         """
         :param text: the raw string
         :return: a list of token
         """
-        return self.seg.lcut(text)
+        return self.seg.segment(text)
 
-    def seg_token_pos(self, text):
+    def pos_tag(self, words):
         """
-        :param text: the raw string
-        :return: a list of token/pos
+        :param words: the list of token
+        :return: a list of pos
         """
-        return ["%s/%s" % (token, pos) for token, pos in self.seg_pos.lcut(text)]
+        return self.pos.postag(words)
+
+    def parse(self, words, pos):
+        arcs = self.parser.parse(words, pos)
+
+        # print("\t".join("%d:%s" % (arc.head, arc.relation) for arc in arcs))
+        nodes = list(map(lambda x: (x.head, x.relation), arcs))
+
+        root_idx = find_x(nodes, 0)
+        root = WordNode(words[root_idx[0]], pos[root_idx[0]], nodes[root_idx[0]][1])
+        tree = {root_idx[0]: root}
+        queue = root_idx
+
+        while len(queue):
+            next_idx = queue.pop()
+            for idx in find_x(nodes, next_idx + 1):
+                queue.insert(0, idx)
+                new_node = WordNode(words[idx], pos[idx], nodes[idx][1])
+                tree[next_idx].next.append(new_node)
+                tree[idx] = new_node
+
+        return root
+
+    def extract(self, path):
+        res = []
+        rule = self.rule
+        for p in path:
+            for r in rule:
+                window_size = len(r.split(";"))
+                if len(p) == window_size:
+                    if ";".join(map(lambda x: "%s,%s" % (x.relation, x.pos), p)) == r:
+                        res.append("".join(map(lambda x: x.token, p)))
+                else:
+                    for i in range(len(p) - window_size):
+                        p_slice = ";".join(map(lambda x: "%s,%s" % (x.relation, x.pos), p[i:i+window_size]))
+                        if p_slice == r:
+                            res.append("".join(map(lambda x: x.token, p[i:i+window_size])))
+                            break
+        return res
 
 
 class PreProcess(object):
@@ -130,36 +219,32 @@ class PreProcess(object):
         self.logger = get_logger("PreProcess")
         self.logger.info("load data from %s" % file_path)
 
-        corpus = pd.read_csv(file_path, "\t")
-
-        self.corpus = corpus.rename(columns={"评论ID": "id",
-                                             "评论内容": "content",
-                                             "平台名称": "platform",
-                                             "发布时间": "timestamp",
-                                             "用户名称": "user"}).drop_duplicates(subset=["id"])
+        self.corpus = pd.read_csv(file_path, "\t")
 
         self.logger.info("data size: %s" % self.corpus.shape[0])
 
         self.cleaner = TextCleaner()
-        self.seg = Segmentor()
+        self.parser = SentenceParser()
         self.segment()
-
-        print(self.corpus.head(20))
 
     def segment(self):
         """
         Segment text
         """
-        def seg(row):
-            row["content_seg"] = self.cleaner.remove_stopwords(self.seg.seg_token(self.cleaner.clean(row["content"])))
-            # row["content_seg"] = self.seg.seg_token(self.cleaner.clean(row["content"]))
+        def seg_pos(row):
+            words = self.parser.seg_token(self.cleaner.clean(row["comment"]))
+            pos = self.parser.pos_tag(words)
+
+            row["comment_seg"] = words
+            row["comment_pos"] = pos
+
             return row
 
-        self.corpus = self.corpus.apply(seg, axis=1)
+        self.corpus = self.corpus.apply(seg_pos, axis=1)
 
     def make_data_set(self):
-        text = self.corpus["content"].values
-        text_seg = np.array(map(lambda x: " ".join(x), self.corpus["content_seg"].values))
+        text = self.corpus["comment"].values
+        text_seg = np.array(map(lambda x: " ".join(x), self.corpus["comment_seg"].values))
 
         return DataSet(text, text_seg)
 
@@ -219,15 +304,25 @@ def shuffle_arrays(*arrays):
 
 
 if __name__ == "__main__":
-    # file_name = "data/comment"
-    # pre = PreProcess(file_name)
     cleaner = TextCleaner()
-    segmentor = Segmentor()
+    parser = SentenceParser()
 
-    test_text = "何事，西风。悲画扇？！你我还行"
-    test_text = cleaner.clean(test_text)
-    print(test_text.decode("utf-8"))
-    test_text = segmentor.seg_token(test_text)
-    print(" ".join(test_text))
-    test_text = cleaner.remove_stopwords(test_text)
-    print(" ".join(test_text))
+    # test_text = "一个多小时就到账了，不错不错。大平台值得推荐"
+    # 资金回款很准时，提现也很快，很稳的平台，等有活动继续加仓
+    test_text = "体验非常好，到期一天后到账，提现当天到，头部平台值得信任"
+    clean_text = cleaner.seg_sentence(test_text)
+    aspect = []
+    for sen in parser.seg_sentence(clean_text):
+        seg_text = parser.seg_token(cleaner.clean(sen))
+        print(" ".join(seg_text))
+        pos_text = parser.pos_tag(seg_text)
+        print(" ".join(pos_text))
+        root = parser.parse(seg_text, pos_text)
+        all_path = root.path()
+
+        for idx, p in enumerate(all_path):
+            print("path %s: %s" % (idx, "\t".join(map(lambda x: x.to_str(), p))))
+
+        aspect.extend(parser.extract(all_path))
+
+    print(";".join(set(aspect)))

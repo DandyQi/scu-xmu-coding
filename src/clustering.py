@@ -4,13 +4,12 @@ from __future__ import print_function
 
 import argparse
 
-import codecs
 import pandas as pd
 from sklearn.cluster import KMeans
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 import utils
-from apriori import Apriori
+# from apriori import Apriori
 from utils import PreProcess
 
 logger = utils.get_logger("clustering")
@@ -31,15 +30,15 @@ def clustering(text, n):
     return res
 
 
-def keyword_discovery(clusters, n):
-    output = codecs.open("data/apriori_output", "w", "utf-8")
-    for i in range(n):
-        apriori = Apriori(min_sup=0.15, min_conf=0.6)
-        df = clusters[clusters["class"] == i]
-        logger.info("The %s class, size is: %s" % (i, df.shape[0]))
-        output.write("\nThe %s class: \n" % i)
-        items, rules = apriori.run_apriori(df["text"].values)
-        apriori.print_results(items, rules, output)
+# def keyword_discovery(clusters, n):
+#     output = codecs.open("data/apriori_output", "w", "utf-8")
+#     for i in range(n):
+#         apriori = Apriori(min_sup=0.15, min_conf=0.6)
+#         df = clusters[clusters["class"] == i]
+#         logger.info("The %s class, size is: %s" % (i, df.shape[0]))
+#         output.write("\nThe %s class: \n" % i)
+#         items, rules = apriori.run_apriori(df["text"].values)
+#         apriori.print_results(items, rules, output)
 
 
 if __name__ == "__main__":
@@ -49,13 +48,16 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    data = PreProcess(args.input_file).make_data_set()
-    data.save_data()
+    data = PreProcess(args.input_file).corpus
+    data = pd.DataFrame(data)
 
-    # data = utils.DataSet.load_data()
+    words = data["comment_seg"].values
+    pos = data["comment_pos"].values
 
-    cluster = clustering(data.text_seg, args.num_cluster)
-
-    # print(cluster.head(20))
-
-    keyword_discovery(cluster, args.num_cluster)
+    adj_list = []
+    for i, w in enumerate(words):
+        w_p = zip(w, pos[i])
+        for item in w_p:
+            if item[1] == "a":
+                adj_list.append(item[0])
+    pd.Series(adj_list).drop_duplicates().to_csv("data/adj", index=False, header=False, encoding="utf-8")
