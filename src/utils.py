@@ -88,7 +88,7 @@ class TextCleaner(object):
 
         return text.strip()
 
-    def seg_sentence(self, text):
+    def split_sentence(self, text):
         for p in self.punctuation:
             text = text.replace(p, "。")
 
@@ -99,11 +99,13 @@ class TextCleaner(object):
 
 
 class WordNode:
-    def __init__(self, token, pos, relation):
+    def __init__(self, token, pos, relation, next_nodes=None):
+        if next_nodes is None:
+            next_nodes = []
         self.token = token
         self.pos = pos
         self.relation = relation
-        self.next = []
+        self.next = next_nodes
 
     def to_str(self):
         return "token: %s, pos: %s, relation: %s" % (self.token, self.pos, self.relation)
@@ -169,6 +171,8 @@ class SentenceParser(object):
         return self.pos.postag(words)
 
     def parse(self, words, pos):
+        if len(words) == 0 or len(pos) == 0:
+            return WordNode("", "", "", None)
         arcs = self.parser.parse(words, pos)
 
         # print("\t".join("%d:%s" % (arc.head, arc.relation) for arc in arcs))
@@ -191,6 +195,8 @@ class SentenceParser(object):
 
     def extract(self, path):
         res = []
+        if len(path) == 0:
+            return res
         rule = self.rule
         for p in path:
             for r in rule:
@@ -225,7 +231,7 @@ class PreProcess(object):
 
         self.cleaner = TextCleaner()
         self.parser = SentenceParser()
-        self.segment()
+        # self.segment()
 
     def segment(self):
         """
@@ -310,7 +316,7 @@ if __name__ == "__main__":
     # test_text = "一个多小时就到账了，不错不错。大平台值得推荐"
     # 资金回款很准时，提现也很快，很稳的平台，等有活动继续加仓
     test_text = "体验非常好，到期一天后到账，提现当天到，头部平台值得信任"
-    clean_text = cleaner.seg_sentence(test_text)
+    clean_text = cleaner.split_sentence(test_text)
     aspect = []
     for sen in parser.seg_sentence(clean_text):
         seg_text = parser.seg_token(cleaner.clean(sen))
